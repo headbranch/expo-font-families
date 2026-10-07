@@ -1,0 +1,54 @@
+{
+	"name": "expo-font-families",
+	"version": "0.1.0",
+	"description": "One font name, every weight, both platforms. Make your expo-font fonts behave like the system font, with a typed style for every face.",
+	"author": "Headbranch <hello@headbranch.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/headbranch/expo-font-families.git"
+	},
+	"bugs": {
+		"url": "https://github.com/headbranch/expo-font-families/issues"
+	},
+	"homepage": "https://github.com/headbranch/expo-font-families#readme",
+	"main": "src/withFontFamilies.js",
+	"types": "index.d.ts",
+	"bin": {
+		"expo-font-families": "bin/expo-font-families.js"
+	},
+	"files": [
+		"app.plugin.js",
+		"index.d.ts",
+		"bin",
+		"src"
+	],
+	"scripts": {
+		"test": "node --test",
+		"release": "release-it"
+	},
+	"keywords": [
+		"expo",
+		"expo-config-plugin",
+		"react-native",
+		"fonts",
+		"font-family",
+		"fontWeight",
+		"typography",
+		"expo-font",
+		"custom-fonts",
+		"google-fonts",
+		"font-weight",
+		"font-families"
+	],
+	"license": "MIT",
+	"peerDependencies": {
+		"expo": ">=53",
+		"expo-font": ">=13.3.0"
+	},
+	"engines": {
+		"node": ">=18"
+	},
+	"devDependencies": {
+		"release-it": "^20.2.1"
+	}
+}

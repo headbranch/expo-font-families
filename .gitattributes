@@ -1,0 +1,4 @@
+# Keep LF everywhere, so the published CLI's shebang works on macOS and Linux.
+* text=auto eol=lf
+*.ttf binary
+*.otf binary
