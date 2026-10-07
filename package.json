@@ -1,6 +1,6 @@
 {
 	"name": "expo-font-families",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "One font name, every weight, both platforms. Make your expo-font fonts behave like the system font, with a typed style for every face.",
 	"author": "Headbranch <hello@headbranch.com>",
 	"repository": {
