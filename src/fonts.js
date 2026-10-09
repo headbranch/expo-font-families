@@ -36,8 +36,9 @@ function readFontMeta(file) {
   }
   if (tables.name == null) throw new Error(`[expo-font-families] ${file}: no 'name' table`);
 
-  // All records for a nameID, best first: Windows English, Unicode, other Windows, Mac Roman.
-  const names = (id) => {
+  // All records for a nameID as { rank, s }, best first: Windows English, Unicode, other Windows,
+  // Mac English, other Mac.
+  const records = (id) => {
     const t = tables.name;
     const count = dv.getUint16(t + 2);
     const strBase = t + dv.getUint16(t + 4);
@@ -59,29 +60,46 @@ function readFontMeta(file) {
       else for (let k = 0; k + 1 < len; k += 2) s += String.fromCharCode(dv.getUint16(off + k));
       out.push({ rank, s });
     }
-    return out.sort((a, b) => a.rank - b.rank).map((n) => n.s);
+    return out.sort((a, b) => a.rank - b.rank);
   };
+  const names = (id) => records(id).map((n) => n.s);
 
   // Typographic family (16) groups all weights; legacy family (1) may include the weight.
   const familyId = names(16).length ? 16 : 1;
-  const families = [...new Set(names(familyId))];
-  if (families.length === 0) throw new Error(`[expo-font-families] ${file}: font has no family name`);
-  if (families.length > 1)
+  const familyRecords = records(familyId);
+  if (familyRecords.length === 0) throw new Error(`[expo-font-families] ${file}: font has no family name`);
+  const family = familyRecords[0].s;
+  // Translations of the name (other Windows and Mac languages) are expected to differ; only
+  // English and language-neutral records that disagree mean iOS might pick another name.
+  const english = [...new Set(familyRecords.filter((n) => n.rank !== 2 && n.rank !== 4).map((n) => n.s))];
+  if (english.length > 1)
     warnOnce(
-      `[expo-font-families] ${path.basename(file)} stores different family names (${families.join(", ")}); ` +
-        `using "${families[0]}". iOS may use another one.`
+      `[expo-font-families] ${path.basename(file)} stores different family names (${english.join(", ")}); ` +
+        `using "${family}". iOS may use another one.`
     );
 
   const os2 = tables["OS/2"];
   return {
-    family: families[0],
+    family,
     weight: cssWeight(os2 != null ? dv.getUint16(os2 + 4) : 400, [...names(17), ...names(2), ...names(4)]),
-    italic:
-      os2 != null
-        ? (dv.getUint16(os2 + 62) & 1) === 1 // fsSelection bit 0
-        : /italic|oblique/i.test(names(2)[0] ?? ""),
+    italic: isItalic(dv, tables, names),
     ext,
   };
+}
+
+/**
+ * Italic or oblique, from OS/2 fsSelection: bit 0 (ITALIC), or bit 9 (OBLIQUE), which only exists
+ * from OS/2 version 4. Without an OS/2 table, from head macStyle bit 1, then from the style name.
+ */
+function isItalic(dv, tables, names) {
+  const os2 = tables["OS/2"];
+  if (os2 != null) {
+    const fsSelection = dv.getUint16(os2 + 62);
+    const oblique = dv.getUint16(os2) >= 4 && (fsSelection & (1 << 9)) !== 0;
+    return (fsSelection & 1) !== 0 || oblique;
+  }
+  if (tables.head != null && (dv.getUint16(tables.head + 44) & 2) !== 0) return true;
+  return /italic|oblique/i.test(names(2)[0] ?? "");
 }
 
 // Weight words in style names, most specific first ("ExtraLight" before "Light").

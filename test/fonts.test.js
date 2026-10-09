@@ -29,6 +29,121 @@ test("reads family, weight and italic from the font itself", () => {
 
 const pick = ({ family, weight, italic, ext }) => ({ family, weight, italic, ext });
 
+/**
+ * A minimal font file with only the tables readFontMeta reads. `names` are [platform, language,
+ * nameID, string]; `os2` and `head` are left out unless given.
+ */
+function makeFont(dir, file, { names, os2, head }) {
+  const strings = names.map(([platform, , , s]) =>
+    platform === 1 ? Buffer.from(s, "latin1") : Buffer.from(s, "utf16le").swap16()
+  );
+  const name = Buffer.alloc(6 + names.length * 12);
+  name.writeUInt16BE(names.length, 2);
+  name.writeUInt16BE(name.length, 4);
+  let off = 0;
+  names.forEach(([platform, lang, id], i) => {
+    const r = 6 + i * 12;
+    name.writeUInt16BE(platform, r);
+    name.writeUInt16BE(lang, r + 4);
+    name.writeUInt16BE(id, r + 6);
+    name.writeUInt16BE(strings[i].length, r + 8);
+    name.writeUInt16BE(off, r + 10);
+    off += strings[i].length;
+  });
+  const tables = [["name", Buffer.concat([name, ...strings])]];
+  if (os2) {
+    const t = Buffer.alloc(96);
+    t.writeUInt16BE(os2.version, 0);
+    t.writeUInt16BE(os2.weight ?? 400, 4);
+    t.writeUInt16BE(os2.fsSelection ?? 0, 62);
+    tables.push(["OS/2", t]);
+  }
+  if (head) {
+    const t = Buffer.alloc(54);
+    t.writeUInt16BE(head.macStyle, 44);
+    tables.push(["head", t]);
+  }
+
+  const dirTable = Buffer.alloc(12 + tables.length * 16);
+  dirTable.writeUInt32BE(0x00010000, 0);
+  dirTable.writeUInt16BE(tables.length, 4);
+  let at = dirTable.length;
+  tables.forEach(([tag, data], i) => {
+    const r = 12 + i * 16;
+    dirTable.write(tag, r, "latin1");
+    dirTable.writeUInt32BE(at, r + 8);
+    dirTable.writeUInt32BE(data.length, r + 12);
+    at += data.length;
+  });
+  const p = path.join(dir, file);
+  fs.writeFileSync(p, Buffer.concat([dirTable, ...tables.map(([, data]) => data)]));
+  return p;
+}
+
+/** Runs fn and returns what it printed with console.warn. */
+function warningsFrom(fn) {
+  const warn = console.warn;
+  const out = [];
+  console.warn = (m) => out.push(m);
+  try {
+    fn();
+  } finally {
+    console.warn = warn;
+  }
+  return out;
+}
+
+const WIN = 3, MAC = 1, EN_US = 0x0409, JA_JP = 0x0411, FR_FR = 0x040c;
+
+test("only warns about family names that disagree in English, not about translations", () => {
+  const dir = tmpDir();
+  const localized = makeFont(dir, "Localized.ttf", {
+    names: [
+      [WIN, EN_US, 16, "Noto Sans JP"],
+      [WIN, JA_JP, 16, "Noto Sans JP 日本語"],
+      [WIN, FR_FR, 16, "Noto Sans JP Français"],
+      [MAC, 0, 16, "Noto Sans JP"],
+      [MAC, 11, 16, "Noto Sans JP Mac JA"],
+    ],
+    os2: { version: 4 },
+  });
+  let meta;
+  assert.deepEqual(warningsFrom(() => (meta = readFontMeta(localized))), []);
+  assert.equal(meta.family, "Noto Sans JP");
+
+  const conflicting = makeFont(dir, "Conflicting.ttf", {
+    names: [
+      [WIN, EN_US, 1, "Acme"],
+      [MAC, 0, 1, "Acme Mac"],
+    ],
+    os2: { version: 4 },
+  });
+  const warnings = warningsFrom(() => (meta = readFontMeta(conflicting)));
+  assert.equal(meta.family, "Acme");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Conflicting\.ttf stores different family names \(Acme, Acme Mac\); using "Acme"/);
+});
+
+test("reads italic from fsSelection ITALIC or OBLIQUE, then head macStyle, then the style name", () => {
+  const dir = tmpDir();
+  const italic = (file, tables) =>
+    readFontMeta(makeFont(dir, file, { names: [[WIN, EN_US, 1, "Acme"], [WIN, EN_US, 2, "Regular"]], ...tables }))
+      .italic;
+
+  assert.equal(italic("a.ttf", { os2: { version: 4, fsSelection: 1 } }), true);
+  assert.equal(italic("b.ttf", { os2: { version: 4, fsSelection: 1 << 9 } }), true);
+  // Bit 9 is reserved before OS/2 version 4.
+  assert.equal(italic("c.ttf", { os2: { version: 3, fsSelection: 1 << 9 } }), false);
+  assert.equal(italic("d.ttf", { os2: { version: 4, fsSelection: 1 << 6 } }), false); // REGULAR
+  // OS/2 wins over head when both are present.
+  assert.equal(italic("e.ttf", { os2: { version: 4 }, head: { macStyle: 2 } }), false);
+  // No OS/2 table.
+  assert.equal(italic("f.ttf", { head: { macStyle: 2 } }), true);
+  assert.equal(italic("g.ttf", { head: { macStyle: 1 } }), false); // bold only
+  const oblique = makeFont(dir, "h.ttf", { names: [[WIN, EN_US, 1, "Acme"], [WIN, EN_US, 2, "Oblique"]] });
+  assert.equal(readFontMeta(oblique).italic, true);
+});
+
 test("collects font files from folders recursively and ignores other files", () => {
   const files = collectFontFiles([FIXTURES], "/").map((f) => path.basename(f));
   assert.deepEqual(files, [
